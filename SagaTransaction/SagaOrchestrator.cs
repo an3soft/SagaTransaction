@@ -197,11 +197,9 @@ namespace SagaTransaction
             if (State == SagaState.Faulted && Rollbacked == RollbackState.None)
             {
                 // Если есть незавершённые этапы, то пробуем подождать, хотя такого быть не должно
-                while (!_complete || _stages.Any(s => s.State == SagaState.InProcess))
+                while (!_complete && _stages.Any(s => s.State == SagaState.InProcess))
                 {
                     await Task.Delay(100, cancellationToken);
-                    if (_complete)
-                        break;
                 }
 
                 // Откатываем только успешно завершённые этапы, так как неуспешные или
