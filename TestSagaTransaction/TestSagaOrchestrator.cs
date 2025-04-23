@@ -145,8 +145,12 @@ namespace TestSagaTransaction
                 stage2,
                 new TestStage2(103),
                 new TestStage2(104),
-                new TestStage2(105),
-                new TestStage2(106)
+                new TestStage1(105),
+                new TestStage2(106),
+                new TestStage2(107),
+                new TestStage1(108),
+                new TestStage2(109),
+                new TestStage1(110),
                 ]);
 
             var state = await saga.Process(SagaProcessType.Parallel);
