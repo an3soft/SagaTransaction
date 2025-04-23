@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
 using SagaTransaction.Abstractions;
-using System.Runtime.CompilerServices;
 
 namespace SagaTransaction
 {
@@ -13,7 +12,7 @@ namespace SagaTransaction
         private readonly ILogger _logger = logger;
         private ISagaStage[] _stages = [];
         private SagaState _state = SagaState.None;
-        private RollbackState _rollbackState = RollbackState.None;
+        private SagaState _rollbackState = SagaState.None;
         private SagaProcessType _processType;
         private readonly Guid _transactionId = Guid.NewGuid();
         private readonly object lockObj = new();
@@ -38,11 +37,11 @@ namespace SagaTransaction
             }
         }
         public ISagaStage[] Stages => _stages;
-        public RollbackState RollbackState
+        public SagaState RollbackState
         {
             get
             {
-                RollbackState ret;
+                SagaState ret;
                 lock (lockObj)
                 {
                     ret = _rollbackState;
@@ -77,7 +76,8 @@ namespace SagaTransaction
         /// <summary>
         /// Выполнение обработки этапов
         /// </summary>
-        /// <param name="processType"></param>
+        /// <param name="processType">Тип обработки</param>
+        /// <param name="cancellationToken">Токен отмены</param>
         /// <returns>Статус обработки</returns>
         /// <exception cref="InvalidOperationException"></exception>
         public async ValueTask<SagaState> Process(SagaProcessType processType = SagaProcessType.Sequentional, CancellationToken cancellationToken = default)
@@ -128,7 +128,7 @@ namespace SagaTransaction
             }
             finally
             {
-                if (State == SagaState.Faulted && RollbackState == RollbackState.None)
+                if (State == SagaState.Faulted && RollbackState == SagaState.None)
                 {
                     await Rollback(cancellationToken);
                 }
@@ -144,8 +144,8 @@ namespace SagaTransaction
         /// <summary>
         /// Обработка этапа
         /// </summary>
-        /// <param name="stage"></param>
-        /// <param name="cancellationToken"></param>
+        /// <param name="stage">Этап</param>
+        /// <param name="cancellationToken">Токен отмены</param>
         /// <returns></returns>
         private async ValueTask<SagaState> ProcessStage(ISagaStage stage, CancellationToken cancellationToken = default)
         {
@@ -183,7 +183,7 @@ namespace SagaTransaction
         private async ValueTask Rollback(CancellationToken cancellationToken = default)
         {
             // Если общая обработка прошла неуспешно
-            if (State == SagaState.Faulted && RollbackState == RollbackState.None)
+            if (State == SagaState.Faulted && RollbackState == SagaState.None)
             {
                 // Если есть незавершённые этапы, то пробуем подождать, хотя такого быть не должно
                 if (_stages.Any(s => s.State == SagaState.InProcess))
@@ -226,14 +226,20 @@ namespace SagaTransaction
                         cancellationToken.ThrowIfCancellationRequested();
                         _logger.LogError("Ошибка отмены этапа \"{StageInfo}\": этап находиться в статусе обработки!", stage.StageInfo);
                     }
-                    RollbackState = RollbackState.Faulted;
+                    RollbackState = SagaState.Faulted;
                 }
 
-                if (RollbackState == RollbackState.None)
-                    RollbackState = RollbackState.Completed;
+                if (RollbackState == SagaState.None)
+                    RollbackState = SagaState.Completed;
             }
         }
 
+        /// <summary>
+        /// Откат этапа
+        /// </summary>
+        /// <param name="stage">Этап</param>
+        /// <param name="cancellationToken">Токен отмены</param>
+        /// <returns></returns>
         private async ValueTask RollbackStage(ISagaStage stage, CancellationToken cancellationToken = default)
         {
             try
@@ -242,13 +248,13 @@ namespace SagaTransaction
                 if (state != SagaState.Completed)
                 {
                     _logger.LogError("Ошибка отмены этапа \"{StageInfo}\" со статусом \"{State}\"!", stage.StageInfo, state);
-                    RollbackState = RollbackState.Faulted;
+                    RollbackState = SagaState.Faulted;
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Ошибка отмены этапа \"{StageInfo}\"!", stage.StageInfo);
-                RollbackState = RollbackState.Faulted;
+                RollbackState = SagaState.Faulted;
             }
         }
     }
