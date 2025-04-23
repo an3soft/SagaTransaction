@@ -38,7 +38,7 @@ namespace TestSagaTransaction
             var state = await saga.Process();
 
             Assert.Equal(SagaState.Completed, state);
-            Assert.Equal(RollbackState.None, saga.Rollbacked);
+            Assert.Equal(RollbackState.None, saga.RollbackState);
             Assert.Equal(SagaState.Completed, stage1.Object.State);
             Assert.Equal(SagaState.Completed, stage2.Object.State);
         }
@@ -76,7 +76,7 @@ namespace TestSagaTransaction
             var state = await saga.Process();
 
             Assert.Equal(SagaState.Faulted, state);
-            Assert.Equal(RollbackState.Completed, saga.Rollbacked);
+            Assert.Equal(RollbackState.Completed, saga.RollbackState);
             Assert.Equal(SagaState.Completed, stage1.Object.State);
             Assert.Equal(SagaState.Faulted, stage2.Object.State);
         }
@@ -100,7 +100,7 @@ namespace TestSagaTransaction
             var state = await saga.Process();
 
             Assert.Equal(SagaState.Completed, state);
-            Assert.Equal(RollbackState.None, saga.Rollbacked);
+            Assert.Equal(RollbackState.None, saga.RollbackState);
             Assert.Equal(SagaState.Completed, stage1.State);
             Assert.Equal(SagaState.Completed, stage2.State);
         }
@@ -124,7 +124,7 @@ namespace TestSagaTransaction
             var state = await saga.Process();
 
             Assert.Equal(SagaState.Faulted, state);
-            Assert.Equal(RollbackState.Completed, saga.Rollbacked);
+            Assert.Equal(RollbackState.Completed, saga.RollbackState);
             Assert.Equal(SagaState.Completed, stage1.State);
             Assert.Equal(SagaState.Faulted, stage2.State);
         }
@@ -156,7 +156,7 @@ namespace TestSagaTransaction
             var state = await saga.Process(SagaProcessType.Parallel);
 
             Assert.Equal(SagaState.Faulted, state);
-            Assert.Equal(RollbackState.Completed, saga.Rollbacked);
+            Assert.Equal(RollbackState.Completed, saga.RollbackState);
             Assert.Equal(SagaState.Completed, stage1.State);
             Assert.Equal(SagaState.Faulted, stage2.State);
         }

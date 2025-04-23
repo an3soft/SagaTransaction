@@ -12,41 +12,46 @@ namespace SagaTransaction
         private readonly ILogger _logger = logger;
         private ISagaStage[] _stages = [];
         private SagaState _state = SagaState.None;
-        private RollbackState _rollbacked = RollbackState.None;
+        private RollbackState _rollbackState = RollbackState.None;
         private readonly Guid _transactionId = Guid.NewGuid();
         private readonly object lockObj = new();
-        private readonly SemaphoreSlim semaphore = new(1, 1);
-        private bool _complete = false;
 
         public Guid TransactionId => _transactionId;
         public SagaState State {
             get
             {
-                SagaState ret = SagaState.None;
+                SagaState ret;
                 lock (lockObj)
                 {
                     ret = _state;
                 }
                 return ret;
-            } }
+            }
+            protected set
+            {
+                lock (lockObj)
+                {
+                    _state = value;
+                }
+            }
+        }
         public ISagaStage[] Stages => _stages;
-        public RollbackState Rollbacked
+        public RollbackState RollbackState
         {
             get
             {
-                RollbackState ret = RollbackState.None;
+                RollbackState ret;
                 lock (lockObj)
                 {
-                    ret = _rollbacked;
+                    ret = _rollbackState;
                 }
                 return ret;
             }
-
             private set
             {
                 lock (lockObj)
                 {
-                    _rollbacked = value;
+                    _rollbackState = value;
                 }
             }
         }
@@ -58,7 +63,7 @@ namespace SagaTransaction
         /// <exception cref="InvalidOperationException"></exception>
         public void AddStages(IEnumerable<ISagaStage> stages)
         {
-            if (_state != SagaState.None)
+            if (State != SagaState.None)
                 throw new InvalidOperationException("Этапы можно добавлять только до начала процесса обработки!");
 
             if (_stages.Length == 0)
@@ -80,18 +85,15 @@ namespace SagaTransaction
                 throw new InvalidOperationException("Процесс обработки уже был запущен!");
 
             // Статус = в обработке
-            lock (lockObj)
-            {
-                _state = SagaState.InProcess;
-            }
+            State = SagaState.InProcess;
 
-            switch (processType)
+            try
             {
-                // Последовательное выполнение
-                case SagaProcessType.Sequentional:
+                switch (processType)
+                {
+                    // Последовательное выполнение
+                    case SagaProcessType.Sequentional:
 
-                    try
-                    {
                         foreach (var stage in _stages)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
@@ -101,18 +103,11 @@ namespace SagaTransaction
 
                             await ProcessStage(stage, cancellationToken);
                         }
-                    }
-                    finally
-                    {
-                        _complete = true;
-                    }
-                    break;
+                        break;
 
-                // Параллельное выполнение
-                case SagaProcessType.Parallel:
+                    // Параллельное выполнение
+                    case SagaProcessType.Parallel:
 
-                    try
-                    {
                         await Parallel.ForEachAsync(_stages, cancellationToken, async (stage, cancellationToken) =>
                         {
                             if (State == SagaState.InProcess)
@@ -120,20 +115,23 @@ namespace SagaTransaction
                                 await ProcessStage(stage, cancellationToken);
                             }
                         });
-                    }
-                    finally
-                    {
-                        _complete = true;
-                    }
-                    break;
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                State = SagaState.Faulted;
+                _logger.LogError(ex, "Ошибка обработки этапов!");
+            }
+            finally
+            {
+                if (State == SagaState.Faulted && RollbackState == RollbackState.None)
+                    await Rollback(cancellationToken);
             }
 
             if (State == SagaState.InProcess)
             {
-                lock (lockObj)
-                {
-                    _state = SagaState.Completed;
-                }
+                State = SagaState.Completed;
             }
 
             return State;
@@ -147,7 +145,7 @@ namespace SagaTransaction
         /// <returns></returns>
         private async ValueTask<SagaState> ProcessStage(ISagaStage stage, CancellationToken cancellationToken = default)
         {
-            var stageState = SagaState.None;
+            SagaState stageState;
 
             try
             {
@@ -155,10 +153,7 @@ namespace SagaTransaction
 
                 if (stageState != SagaState.Completed)
                 {
-                    lock (lockObj)
-                    {
-                        _state = SagaState.Faulted;
-                    }
+                    State = SagaState.Faulted;
                 }
 
                 if (stage.State != stageState
@@ -170,16 +165,8 @@ namespace SagaTransaction
             }
             catch
             {
-                lock (lockObj)
-                {
-                    _state = SagaState.Faulted;
-                }
+                State = SagaState.Faulted;
                 throw;
-            }
-            finally
-            {
-                if (State == SagaState.Faulted && Rollbacked == RollbackState.None)
-                    await Rollback(cancellationToken);
             }
 
             return stageState;
@@ -191,13 +178,11 @@ namespace SagaTransaction
         /// <returns></returns>
         private async ValueTask Rollback(CancellationToken cancellationToken = default)
         {
-            await semaphore.WaitAsync(cancellationToken);
-
             // Если общая обработка прошла неуспешно
-            if (State == SagaState.Faulted && Rollbacked == RollbackState.None)
+            if (State == SagaState.Faulted && RollbackState == RollbackState.None)
             {
                 // Если есть незавершённые этапы, то пробуем подождать, хотя такого быть не должно
-                while (!_complete && _stages.Any(s => s.State == SagaState.InProcess))
+                if (_stages.Any(s => s.State == SagaState.InProcess))
                 {
                     await Task.Delay(100, cancellationToken);
                 }
@@ -213,13 +198,13 @@ namespace SagaTransaction
                         if (state != SagaState.Completed)
                         {
                             _logger.LogError("Ошибка отмены этапа \"{StageInfo}\" со статусом \"{State}\"!", stage.StageInfo, state);
-                            Rollbacked = RollbackState.Faulted;
+                            RollbackState = RollbackState.Faulted;
                         }
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Ошибка отмены этапа \"{StageInfo}\"!", stage.StageInfo);
-                        Rollbacked = RollbackState.Faulted;
+                        RollbackState = RollbackState.Faulted;
                     }
                 }
 
@@ -231,14 +216,12 @@ namespace SagaTransaction
                         cancellationToken.ThrowIfCancellationRequested();
                         _logger.LogError("Ошибка отмены этапа \"{StageInfo}\": этап находиться в статусе обработки!", stage.StageInfo);
                     }
-                    Rollbacked = RollbackState.Faulted;
+                    RollbackState = RollbackState.Faulted;
                 }
 
-                if (Rollbacked == RollbackState.None)
-                    Rollbacked = RollbackState.Completed;
+                if (RollbackState == RollbackState.None)
+                    RollbackState = RollbackState.Completed;
             }
-
-            semaphore.Release();
         }
     }
 }

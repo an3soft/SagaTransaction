@@ -26,7 +26,7 @@
         public Guid TransactionId { get; }
         public SagaState State { get; }
         public ISagaStage[] Stages { get; }
-        public RollbackState Rollbacked { get; }
+        public RollbackState RollbackState { get; }
         public void AddStages(IEnumerable<ISagaStage> stages);
         public ValueTask<SagaState> Process(SagaProcessType processType = SagaProcessType.Sequentional, CancellationToken cancellationToken = default);
     }
