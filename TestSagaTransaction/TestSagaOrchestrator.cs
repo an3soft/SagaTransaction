@@ -128,5 +128,33 @@ namespace TestSagaTransaction
             Assert.Equal(SagaState.Completed, stage1.State);
             Assert.Equal(SagaState.Faulted, stage2.State);
         }
+
+        [Fact]
+        public async Task TestRealWorldFaultedInParallel()
+        {
+            var logger = Mock.Of<ILogger<SagaOrchestrator>>();
+            ISagaOrchestrator saga = new SagaOrchestrator(logger);
+
+            // этап 1 удачно выполнился без отката
+            ISagaStage stage1 = new TestStage1();
+            // этап 2 удачно выполнился без отката
+            ISagaStage stage2 = new TestStage2();
+
+            saga.AddStages([
+                stage1,
+                stage2,
+                new TestStage2(103),
+                new TestStage2(104),
+                new TestStage2(105),
+                new TestStage2(106)
+                ]);
+
+            var state = await saga.Process(SagaProcessType.Parallel);
+
+            Assert.Equal(SagaState.Faulted, state);
+            Assert.Equal(RollbackState.Completed, saga.Rollbacked);
+            Assert.Equal(SagaState.Completed, stage1.State);
+            Assert.Equal(SagaState.Faulted, stage2.State);
+        }
     }
 }

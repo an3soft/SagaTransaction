@@ -16,6 +16,7 @@ namespace SagaTransaction
         private readonly Guid _transactionId = Guid.NewGuid();
         private readonly object lockObj = new();
         private readonly SemaphoreSlim semaphore = new(1, 1);
+        private bool _complete = false;
 
         public Guid TransactionId => _transactionId;
         public SagaState State {
@@ -89,27 +90,41 @@ namespace SagaTransaction
                 // Последовательное выполнение
                 case SagaProcessType.Sequentional:
 
-                    foreach (var stage in _stages)
+                    try
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
+                        foreach (var stage in _stages)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
 
-                        if (State != SagaState.InProcess)
-                            break;
+                            if (State != SagaState.InProcess)
+                                break;
 
-                        await ProcessStage(stage, cancellationToken);
+                            await ProcessStage(stage, cancellationToken);
+                        }
+                    }
+                    finally
+                    {
+                        _complete = true;
                     }
                     break;
 
                 // Параллельное выполнение
                 case SagaProcessType.Parallel:
 
-                    await Parallel.ForEachAsync(_stages, cancellationToken, async (stage, cancellationToken) =>
+                    try
                     {
-                        if (State == SagaState.InProcess)
+                        await Parallel.ForEachAsync(_stages, cancellationToken, async (stage, cancellationToken) =>
                         {
-                            await ProcessStage(stage, cancellationToken);
-                        }
-                    });
+                            if (State == SagaState.InProcess)
+                            {
+                                await ProcessStage(stage, cancellationToken);
+                            }
+                        });
+                    }
+                    finally
+                    {
+                        _complete = true;
+                    }
                     break;
             }
 
@@ -182,8 +197,10 @@ namespace SagaTransaction
             if (State == SagaState.Faulted && Rollbacked == RollbackState.None)
             {
                 // Если есть незавершённые этапы, то пробуем подождать, хотя такого быть не должно
-                if (_stages.Any(s => s.State == SagaState.InProcess))
+                while (!_complete && _stages.Any(s => s.State == SagaState.InProcess))
+                {
                     await Task.Delay(100, cancellationToken);
+                }
 
                 // Откатываем только успешно завершённые этапы, так как неуспешные или
                 // не начатые нет смысла откатывать, как и те что в процессе

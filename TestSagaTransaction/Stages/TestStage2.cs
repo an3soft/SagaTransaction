@@ -6,15 +6,16 @@ using static System.Net.Mime.MediaTypeNames;
 
 namespace TestSagaTransaction.Stages
 {
-    public class TestStage2 : BaseStage
+    public class TestStage2(int id = 102) : BaseStage
     {
+        private readonly int _id = id;
         public override string StageInfo => "TestStage2";
 
         public override async ValueTask<SagaState> Process(Guid transactionId, CancellationToken cancellationToken = default)
         {
             Post data = new()
             {
-                Id = 102,
+                Id = _id,
                 UserId = 1,
                 Title = "Test",
                 Body = $"{transactionId}",
@@ -56,7 +57,7 @@ namespace TestSagaTransaction.Stages
             // Эмуляция отката
             try
             {
-                using var request = GetHttpRequestMessage(HttpMethod.Delete, $"posts/102", [new("X-TransactionId", "transactionId")]);
+                using var request = GetHttpRequestMessage(HttpMethod.Delete, $"posts/{_id}", [new("X-TransactionId", "transactionId")]);
 
                 var responce = await client.SendAsync(request, cancellationToken);
 
