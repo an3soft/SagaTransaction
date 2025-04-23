@@ -159,6 +159,9 @@ namespace TestSagaTransaction
             Assert.Equal(RollbackState.Completed, saga.RollbackState);
             Assert.Equal(SagaState.Completed, stage1.State);
             Assert.Equal(SagaState.Faulted, stage2.State);
+            Assert.DoesNotContain(saga.Stages, s => s.State == SagaState.InProcess);
+            Assert.Contains(saga.Stages, s => s.State == SagaState.None || s.State == SagaState.Completed);
+            Assert.Contains(saga.Stages, s => s.State == SagaState.Faulted);
         }
     }
 }
